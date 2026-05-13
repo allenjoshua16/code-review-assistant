@@ -1,0 +1,48 @@
+:root {
+  --canvas: #f7f8f5;
+  --surface: #ffffff;
+  --border: #dfe4dc;
+  --text: #34413d;
+  --text-strong: #121917;
+  --text-soft: #5c6864;
+  --muted: #66746f;
+  --code-bg: #111816;
+  --code-text: #e8efe9;
+  --shadow: 0 18px 45px rgba(18, 25, 23, 0.08);
+  --sans:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    sans-serif;
+  --mono:
+    'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, ui-monospace, monospace;
+
+  color: var(--text);
+  background: var(--canvas);
+  font-family: var(--sans);
+  font-synthesis: none;
+  line-height: 1.5;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+}
+
+button,
+select,
+textarea {
+  font: inherit;
+}
+
+button:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(73, 160, 120, 0.35);
+  outline-offset: 2px;
+}
