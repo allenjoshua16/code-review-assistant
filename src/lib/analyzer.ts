@@ -254,6 +254,35 @@ export const analyzeSnippet = (code: string, language: string): ReviewResult => 
     })
   }
 
+  if (language === 'python' && /\belis\b/.test(trimmedCode)) {
+    addFinding(findings, {
+      category: 'bugs',
+      severity: 'high',
+      title: 'Likely Python syntax typo: `elis`',
+      detail:
+        'The snippet contains `elis`, which is not a valid Python keyword and will stop execution with a syntax error.',
+      suggestion:
+        'Replace `elis` with `elif` in the conditional chain.',
+    })
+  }
+
+  if (
+    language === 'python' &&
+    /\b\w+\s*=\s*input\s*\(/.test(trimmedCode) &&
+    /print\s*\([^)]*\b\w+\s*[+\-*/]\s*\w+/.test(trimmedCode) &&
+    !/(int|float)\s*\(\s*input\s*\(/.test(trimmedCode)
+  ) {
+    addFinding(findings, {
+      category: 'bugs',
+      severity: 'high',
+      title: 'Arithmetic uses raw input strings',
+      detail:
+        '`input()` returns strings. Using `+`, `-`, `*`, or `/` directly on those values can produce wrong results or runtime type errors.',
+      suggestion:
+        'Convert numeric inputs using `int(...)` or `float(...)` before arithmetic.',
+    })
+  }
+
   if (language === 'python' && /\bopen\s*\(/.test(trimmedCode) && !/\bwith\s+open\s*\(/.test(trimmedCode)) {
     addFinding(findings, {
       category: 'improvements',

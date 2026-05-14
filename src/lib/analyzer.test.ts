@@ -46,6 +46,25 @@ console.log(apiKey)`),
     ).toContain('Mutable default argument is shared between calls')
   })
 
+  it('flags Python calculator syntax and numeric-input bugs', () => {
+    const findings = titlesFor(
+      `num1 = input("Enter first number: ")
+operator = input("Enter operator (+, -, *, /): ")
+num2 = input("Enter second number: ")
+
+if operator == "+":
+    print("Result:", num1 + num2)
+elif operator == "-":
+    print("Result:", num1 - num2)
+elis operator == "*":
+    print("Result:", num1 * num2)`,
+      'python',
+    )
+
+    expect(findings).toContain('Likely Python syntax typo: `elis`')
+    expect(findings).toContain('Arithmetic uses raw input strings')
+  })
+
   it('returns SQL-specific findings', () => {
     expect(titlesFor('DELETE users', 'sql')).toContain(
       'Data-changing query has no WHERE clause',
