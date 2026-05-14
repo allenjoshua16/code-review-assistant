@@ -38,6 +38,9 @@ const addFinding = (
   })
 }
 
+const hasAny = (code: string, patterns: RegExp[]) =>
+  patterns.some((pattern) => pattern.test(code))
+
 export const analyzeSnippet = (code: string, language: string): ReviewResult => {
   const trimmedCode = code.trim()
   const lines = trimmedCode ? trimmedCode.split(/\r?\n/) : []
@@ -62,6 +65,9 @@ export const analyzeSnippet = (code: string, language: string): ReviewResult => 
     trimmedCode.match(/\b(function|def|class|const|let|var)\b|=>/g) ?? []
   const commentMatches =
     trimmedCode.match(/(\/\/|#|\/\*|\*\/|<!--|-->|""")/g) ?? []
+  const hasBranching = /\b(if|else|switch|case|for|while|try|catch|except)\b/.test(
+    trimmedCode,
+  )
 
   if (/\b(eval|exec)\s*\(/.test(trimmedCode)) {
     addFinding(findings, {
@@ -99,6 +105,103 @@ export const analyzeSnippet = (code: string, language: string): ReviewResult => 
     })
   }
 
+  if (
+    ['javascript', 'typescript'].includes(language) &&
+    /\b\w+\.\w+\.\w+/.test(trimmedCode) &&
+    !hasAny(trimmedCode, [/\?\./, /\bif\s*\([^)]*\b\w+\.\w+\b/, /\btypeof\b/])
+  ) {
+    addFinding(findings, {
+      category: 'bugs',
+      severity: 'medium',
+      title: 'Nested property access can throw',
+      detail:
+        'The snippet reads through multiple object levels without a guard. Missing input data can crash this path at runtime.',
+      suggestion:
+        'Use optional chaining, validate the input shape, or return a controlled fallback before reading nested fields.',
+    })
+  }
+
+  if (
+    ['javascript', 'typescript'].includes(language) &&
+    /\.to[A-Z]\w*\(\)/.test(trimmedCode) &&
+    !hasAny(trimmedCode, [/\btypeof\b/, /\?\./, /\|\|/, /\?\?/])
+  ) {
+    addFinding(findings, {
+      category: 'bugs',
+      severity: 'medium',
+      title: 'Value is used as a string without validation',
+      detail:
+        'A string method is called directly, so null, undefined, or non-string values will fail before the function can recover.',
+      suggestion:
+        'Validate or normalize the value before calling the string method, and decide what fallback should be returned.',
+    })
+  }
+
+  if (
+    ['javascript', 'typescript'].includes(language) &&
+    /\.reduce\s*\(/.test(trimmedCode) &&
+    !/\.reduce\s*\([^,]+,[^)]+\)/s.test(trimmedCode)
+  ) {
+    addFinding(findings, {
+      category: 'bugs',
+      severity: 'medium',
+      title: 'Reduce call has no initial value',
+      detail:
+        'Calling reduce without an initial value throws on an empty array and can produce surprising accumulator types.',
+      suggestion:
+        'Pass an explicit initial accumulator value that matches the intended result type.',
+    })
+  }
+
+  if (
+    ['javascript', 'typescript'].includes(language) &&
+    /\.reduce\s*\(/.test(trimmedCode) &&
+    /\+\s*\w+\.\w+/.test(trimmedCode) &&
+    !hasAny(trimmedCode, [/\bNumber\s*\(/, /\?\?/, /\|\|\s*0/, /typeof\s+\w+\.\w+/])
+  ) {
+    addFinding(findings, {
+      category: 'bugs',
+      severity: 'medium',
+      title: 'Numeric aggregation assumes valid item values',
+      detail:
+        'The reducer adds an object property directly. Missing or non-numeric values can turn the total into NaN or string concatenation.',
+      suggestion:
+        'Coerce or validate the value before adding it, and use a fallback such as zero for missing numeric fields.',
+    })
+  }
+
+  if (
+    ['javascript', 'typescript'].includes(language) &&
+    /\bfetch\s*\(/.test(trimmedCode) &&
+    !/\.ok\b|status\b/.test(trimmedCode)
+  ) {
+    addFinding(findings, {
+      category: 'bugs',
+      severity: 'medium',
+      title: 'HTTP response status is not checked',
+      detail:
+        'A fetch call can resolve successfully for 4xx and 5xx responses, so parsing the body is not enough to detect failure.',
+      suggestion:
+        'Check `response.ok` or the status code before using the response payload.',
+    })
+  }
+
+  if (
+    ['javascript', 'typescript'].includes(language) &&
+    /\basync\b[\s\S]*\bawait\b/.test(trimmedCode) &&
+    !/\btry\b[\s\S]*\bcatch\b/.test(trimmedCode)
+  ) {
+    addFinding(findings, {
+      category: 'improvements',
+      severity: 'medium',
+      title: 'Async failure path is not handled locally',
+      detail:
+        'Awaited work can reject and skip the rest of the function if the caller does not handle the error.',
+      suggestion:
+        'Handle expected failures close to the operation, or document that the caller is responsible for catching them.',
+    })
+  }
+
   if (/\b(var)\b/.test(trimmedCode) && ['javascript', 'typescript'].includes(language)) {
     addFinding(findings, {
       category: 'style',
@@ -111,7 +214,7 @@ export const analyzeSnippet = (code: string, language: string): ReviewResult => 
     })
   }
 
-  if (/console\.log|print\(/.test(trimmedCode)) {
+  if (/console\.log|print\(|System\.out\.println/.test(trimmedCode)) {
     addFinding(findings, {
       category: 'improvements',
       severity: 'low',
@@ -120,6 +223,82 @@ export const analyzeSnippet = (code: string, language: string): ReviewResult => 
         'Raw debug statements can clutter user logs and expose internal values.',
       suggestion:
         'Use a structured logger, remove temporary statements, or gate diagnostic output behind a debug flag.',
+    })
+  }
+
+  if (
+    ['javascript', 'typescript'].includes(language) &&
+    /\b(push|splice|sort|reverse)\s*\(/.test(trimmedCode) &&
+    !/const\s+\w+\s*=\s*\[?\.\.\./.test(trimmedCode)
+  ) {
+    addFinding(findings, {
+      category: 'improvements',
+      severity: 'low',
+      title: 'Mutation may leak outside this scope',
+      detail:
+        'The snippet mutates an array in place. That can surprise callers when the input is shared with other code.',
+      suggestion:
+        'Return a new array for transformations, or make the mutation explicit in the function name and contract.',
+    })
+  }
+
+  if (language === 'python' && /def\s+\w+\([^)]*=\s*(\[\]|\{\})/.test(trimmedCode)) {
+    addFinding(findings, {
+      category: 'bugs',
+      severity: 'high',
+      title: 'Mutable default argument is shared between calls',
+      detail:
+        'Python evaluates default arguments once, so the same list or dictionary can be reused across separate calls.',
+      suggestion:
+        'Use `None` as the default and create a new list or dictionary inside the function.',
+    })
+  }
+
+  if (language === 'python' && /\bopen\s*\(/.test(trimmedCode) && !/\bwith\s+open\s*\(/.test(trimmedCode)) {
+    addFinding(findings, {
+      category: 'improvements',
+      severity: 'medium',
+      title: 'File handle is not managed with a context manager',
+      detail:
+        'Opening a file without `with` can leave resources open when an exception interrupts the function.',
+      suggestion:
+        'Use `with open(...) as file:` so the handle is closed reliably.',
+    })
+  }
+
+  if (language === 'java' && /\.equals\s*\(/.test(trimmedCode) === false && /"\s*==|==\s*"/.test(trimmedCode)) {
+    addFinding(findings, {
+      category: 'bugs',
+      severity: 'medium',
+      title: 'String comparison uses reference equality',
+      detail:
+        'In Java, `==` compares object references rather than string contents.',
+      suggestion:
+        'Use `.equals(...)` or `Objects.equals(...)` for content comparison.',
+    })
+  }
+
+  if (language === 'sql' && /select\s+\*/i.test(trimmedCode)) {
+    addFinding(findings, {
+      category: 'improvements',
+      severity: 'medium',
+      title: 'Query selects every column',
+      detail:
+        '`SELECT *` can fetch unnecessary data and become fragile when table schemas change.',
+      suggestion:
+        'Select only the columns the caller actually needs.',
+    })
+  }
+
+  if (language === 'sql' && /(update|delete)\s+\w+/i.test(trimmedCode) && !/\bwhere\b/i.test(trimmedCode)) {
+    addFinding(findings, {
+      category: 'bugs',
+      severity: 'high',
+      title: 'Data-changing query has no WHERE clause',
+      detail:
+        'An update or delete without a filter can affect every row in the target table.',
+      suggestion:
+        'Add a specific `WHERE` clause and consider running the matching `SELECT` first before executing the change.',
     })
   }
 
@@ -159,7 +338,10 @@ export const analyzeSnippet = (code: string, language: string): ReviewResult => 
     })
   }
 
-  if (!/test|spec|assert|expect|pytest|unittest/i.test(trimmedCode)) {
+  if (
+    (lines.length >= 8 || hasBranching) &&
+    !/test|spec|assert|expect|pytest|unittest/i.test(trimmedCode)
+  ) {
     addFinding(findings, {
       category: 'improvements',
       severity: 'low',
