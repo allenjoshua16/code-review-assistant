@@ -1,15 +1,27 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   BarChart3,
   Bug,
   CheckCircle2,
   Code2,
+  Download,
   Lightbulb,
   Sparkles,
   Wand2,
 } from 'lucide-react'
-import { analyzeSnippet, type ReviewCategory, type Severity } from './lib/analyzer'
+import { analyzeSnippet, type Finding, type ReviewCategory, type Severity } from './lib/analyzer'
+import {
+  exportAnalyticsJson,
+  exportRecommendationCsv,
+  exportTelemetryCsv,
+  getAnalyticsSnapshot,
+  getAnalyzerVariant,
+  logLlmTrace,
+  logRecommendationFeedback,
+  logReviewTelemetry,
+  scoreRisk,
+} from './lib/analytics'
 import './App.css'
 
 const sampleSnippet = `function getUserName(user) {
@@ -30,12 +42,79 @@ const severityRank: Record<Severity, number> = {
   low: 3,
 }
 
+const applyAnalyzerVariant = (variant: 'rules_v1' | 'rules_v2', code: string, language: string) => {
+  const baseReview = analyzeSnippet(code, language)
+  if (variant === 'rules_v1') return baseReview
+
+  const findings = [...baseReview.findings]
+  if (
+    findings.length > 0 &&
+    language === 'python' &&
+    /\binput\s*\(/.test(code) &&
+    !/try\s*:/.test(code)
+  ) {
+    findings.push({
+      id: `improvements-${findings.length + 1}`,
+      category: 'improvements',
+      severity: 'low',
+      title: 'A/B variant adds input guard recommendation',
+      detail:
+        'This analyzer variant recommends explicit validation around interactive input paths.',
+      suggestion:
+        'Wrap parsing/validation logic in a function and guard invalid values before control flow branches.',
+    })
+  }
+
+  const penalty = findings.reduce(
+    (sum, finding) =>
+      sum + (finding.severity === 'high' ? 18 : finding.severity === 'medium' ? 10 : 5),
+    0,
+  )
+  const score = Math.max(15, Math.min(100, 100 - penalty))
+  return {
+    ...baseReview,
+    findings,
+    score,
+  }
+}
+
 function App() {
   const [code, setCode] = useState(sampleSnippet)
   const [language, setLanguage] = useState('javascript')
   const [activeCategory, setActiveCategory] = useState<ReviewCategory | 'all'>('all')
+  const [, setAnalyticsVersion] = useState(0)
+  const analyzerVariant = useMemo(() => getAnalyzerVariant(), [])
+  const lastTelemetrySignature = useRef('')
 
-  const review = useMemo(() => analyzeSnippet(code, language), [code, language])
+  const review = useMemo(
+    () => applyAnalyzerVariant(analyzerVariant, code, language),
+    [analyzerVariant, code, language],
+  )
+  const risk = useMemo(() => scoreRisk(review), [review])
+  const analytics = getAnalyticsSnapshot()
+
+  useEffect(() => {
+    const signature = `${language}:${code}:${analyzerVariant}:${review.score}:${review.findings
+      .map((item) => item.id)
+      .join(',')}`
+    if (signature === lastTelemetrySignature.current) return
+    lastTelemetrySignature.current = signature
+
+    const startedAt = performance.now()
+    logReviewTelemetry(code, language, review, analyzerVariant)
+    logLlmTrace({
+      provider: 'local-rules-engine',
+      model: analyzerVariant,
+      promptVersion: 'ruleset_v1',
+      latencyMs: Math.max(1, Math.round(performance.now() - startedAt)),
+      inputTokens: Math.round(code.length / 4),
+      outputTokens: Math.max(20, review.findings.length * 26),
+      costUsd: 0,
+      status: 'success',
+    })
+    setAnalyticsVersion((version) => version + 1)
+  }, [analyzerVariant, code, language, review])
+
   const filteredFindings = review.findings
     .filter((finding) => activeCategory === 'all' || finding.category === activeCategory)
     .sort((a, b) => severityRank[a.severity] - severityRank[b.severity])
@@ -47,6 +126,11 @@ function App() {
     },
     { bugs: 0, improvements: 0, style: 0 } as Record<ReviewCategory, number>,
   )
+
+  const handleFeedback = (finding: Finding, action: 'applied' | 'not_useful') => {
+    logRecommendationFeedback(finding, action)
+    setAnalyticsVersion((version) => version + 1)
+  }
 
   return (
     <main className="app-shell">
@@ -65,6 +149,28 @@ function App() {
         <div className="score-panel" aria-label="Review score">
           <span>{review.score}</span>
           <p>quality score</p>
+        </div>
+      </section>
+
+      <section className="analytics-strip">
+        <Metric label="Analyzer Variant" value={analytics.assignment.variant.toUpperCase()} />
+        <Metric label="Risk" value={`${risk.label.toUpperCase()} ${(risk.probability * 100).toFixed(1)}%`} />
+        <Metric label="Telemetry Events" value={analytics.telemetryCount} />
+        <Metric label="Recommendation Fix Rate" value={`${(analytics.recommendationEffectiveness * 100).toFixed(1)}%`} />
+        <Metric label="LLM Trace Events" value={analytics.llmTraceCount} />
+        <div className="export-actions">
+          <button type="button" onClick={exportTelemetryCsv}>
+            <Download size={14} />
+            Telemetry CSV
+          </button>
+          <button type="button" onClick={exportRecommendationCsv}>
+            <Download size={14} />
+            Feedback CSV
+          </button>
+          <button type="button" onClick={exportAnalyticsJson}>
+            <Download size={14} />
+            Full JSON
+          </button>
         </div>
       </section>
 
@@ -154,6 +260,14 @@ function App() {
                       <AlertTriangle size={16} />
                       <span>{finding.suggestion}</span>
                     </div>
+                    <div className="finding-actions">
+                      <button type="button" onClick={() => handleFeedback(finding, 'applied')}>
+                        Mark Applied
+                      </button>
+                      <button type="button" onClick={() => handleFeedback(finding, 'not_useful')}>
+                        Mark Not Useful
+                      </button>
+                    </div>
                   </article>
                 )
               })
@@ -169,21 +283,21 @@ function App() {
 
       <section className="foundation">
         <div>
-          <p className="eyebrow">Project structure</p>
-          <h2>Foundation to evolve into an AI reviewer</h2>
+          <p className="eyebrow">Data science instrumentation</p>
+          <h2>Telemetry, experimentation, risk scoring, exports, observability</h2>
         </div>
         <div className="foundation-grid">
           <FoundationItem
-            title="Frontend workspace"
-            text="React owns the editor, filters, review cards, and quality metrics."
+            title="Telemetry pipeline"
+            text={`Review events tracked: ${analytics.telemetryCount}. Includes language, severity mix, score, risk probability, and analyzer variant.`}
           />
           <FoundationItem
-            title="Analysis layer"
-            text="The current heuristic analyzer is isolated in src/lib and can be replaced by an API-backed AI service."
+            title="A/B testing + effectiveness"
+            text={`Experiment: ${analytics.assignment.experiment}, variant: ${analytics.assignment.variant}. Recommendation fix-rate: ${(analytics.recommendationEffectiveness * 100).toFixed(1)}%.`}
           />
           <FoundationItem
-            title="Next backend step"
-            text="Add an endpoint that sends code, language, and review goals to a model with a strict JSON schema."
+            title="LLM observability"
+            text={`Trace count: ${analytics.llmTraceCount}. Avg latency: ${analytics.llmObservability.avgLatencyMs} ms. Cost tracked as USD for model-based analyzers.`}
           />
         </div>
       </section>
@@ -191,7 +305,7 @@ function App() {
   )
 }
 
-function Metric({ label, value }: { label: string; value: number }) {
+function Metric({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="metric">
       <strong>{value}</strong>

@@ -70,6 +70,13 @@
   align-items: start;
 }
 
+.analytics-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) minmax(260px, 1.2fr);
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
 .editor-pane,
 .results-pane {
   border: 1px solid var(--border);
@@ -164,8 +171,9 @@ textarea {
 
 .metric strong {
   color: var(--text-strong);
-  font-size: 25px;
+  font-size: 21px;
   line-height: 1;
+  overflow-wrap: anywhere;
 }
 
 .metric span {
@@ -285,6 +293,45 @@ textarea {
   color: #c57b22;
 }
 
+.finding-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.finding-actions button,
+.export-actions button {
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-strong);
+  cursor: pointer;
+  padding: 6px 10px;
+}
+
+.finding-actions button:hover,
+.export-actions button:hover {
+  border-color: #49a078;
+}
+
+.export-actions {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--canvas);
+  padding: 10px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.export-actions button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+}
+
 .empty-state {
   min-height: 160px;
   display: grid;
@@ -348,6 +395,10 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .analytics-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .score-panel {
     min-height: 120px;
   }
@@ -383,7 +434,15 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .analytics-strip {
+    grid-template-columns: 1fr;
+  }
+
   .finding-header {
+    flex-direction: column;
+  }
+
+  .finding-actions {
     flex-direction: column;
   }
 }
