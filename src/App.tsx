@@ -5,22 +5,15 @@ import {
   Bug,
   CheckCircle2,
   Code2,
-  Download,
   Lightbulb,
   Sparkles,
   Wand2,
 } from 'lucide-react'
-import { analyzeSnippet, type Finding, type ReviewCategory, type Severity } from './lib/analyzer'
+import { analyzeSnippet, type ReviewCategory, type Severity } from './lib/analyzer'
 import {
-  exportAnalyticsJson,
-  exportRecommendationCsv,
-  exportTelemetryCsv,
-  getAnalyticsSnapshot,
   getAnalyzerVariant,
   logLlmTrace,
-  logRecommendationFeedback,
   logReviewTelemetry,
-  scoreRisk,
 } from './lib/analytics'
 import './App.css'
 
@@ -82,7 +75,6 @@ function App() {
   const [code, setCode] = useState(sampleSnippet)
   const [language, setLanguage] = useState('javascript')
   const [activeCategory, setActiveCategory] = useState<ReviewCategory | 'all'>('all')
-  const [, setAnalyticsVersion] = useState(0)
   const analyzerVariant = useMemo(() => getAnalyzerVariant(), [])
   const lastTelemetrySignature = useRef('')
 
@@ -90,8 +82,6 @@ function App() {
     () => applyAnalyzerVariant(analyzerVariant, code, language),
     [analyzerVariant, code, language],
   )
-  const risk = useMemo(() => scoreRisk(review), [review])
-  const analytics = getAnalyticsSnapshot()
 
   useEffect(() => {
     const signature = `${language}:${code}:${analyzerVariant}:${review.score}:${review.findings
@@ -112,7 +102,6 @@ function App() {
       costUsd: 0,
       status: 'success',
     })
-    setAnalyticsVersion((version) => version + 1)
   }, [analyzerVariant, code, language, review])
 
   const filteredFindings = review.findings
@@ -126,11 +115,6 @@ function App() {
     },
     { bugs: 0, improvements: 0, style: 0 } as Record<ReviewCategory, number>,
   )
-
-  const handleFeedback = (finding: Finding, action: 'applied' | 'not_useful') => {
-    logRecommendationFeedback(finding, action)
-    setAnalyticsVersion((version) => version + 1)
-  }
 
   return (
     <main className="app-shell">
@@ -149,28 +133,6 @@ function App() {
         <div className="score-panel" aria-label="Review score">
           <span>{review.score}</span>
           <p>quality score</p>
-        </div>
-      </section>
-
-      <section className="analytics-strip">
-        <Metric label="Analyzer Variant" value={analytics.assignment.variant.toUpperCase()} />
-        <Metric label="Risk" value={`${risk.label.toUpperCase()} ${(risk.probability * 100).toFixed(1)}%`} />
-        <Metric label="Telemetry Events" value={analytics.telemetryCount} />
-        <Metric label="Recommendation Fix Rate" value={`${(analytics.recommendationEffectiveness * 100).toFixed(1)}%`} />
-        <Metric label="LLM Trace Events" value={analytics.llmTraceCount} />
-        <div className="export-actions">
-          <button type="button" onClick={exportTelemetryCsv}>
-            <Download size={14} />
-            Telemetry CSV
-          </button>
-          <button type="button" onClick={exportRecommendationCsv}>
-            <Download size={14} />
-            Feedback CSV
-          </button>
-          <button type="button" onClick={exportAnalyticsJson}>
-            <Download size={14} />
-            Full JSON
-          </button>
         </div>
       </section>
 
@@ -260,14 +222,6 @@ function App() {
                       <AlertTriangle size={16} />
                       <span>{finding.suggestion}</span>
                     </div>
-                    <div className="finding-actions">
-                      <button type="button" onClick={() => handleFeedback(finding, 'applied')}>
-                        Mark Applied
-                      </button>
-                      <button type="button" onClick={() => handleFeedback(finding, 'not_useful')}>
-                        Mark Not Useful
-                      </button>
-                    </div>
                   </article>
                 )
               })
@@ -281,26 +235,6 @@ function App() {
         </div>
       </section>
 
-      <section className="foundation">
-        <div>
-          <p className="eyebrow">Data science instrumentation</p>
-          <h2>Telemetry, experimentation, risk scoring, exports, observability</h2>
-        </div>
-        <div className="foundation-grid">
-          <FoundationItem
-            title="Telemetry pipeline"
-            text={`Review events tracked: ${analytics.telemetryCount}. Includes language, severity mix, score, risk probability, and analyzer variant.`}
-          />
-          <FoundationItem
-            title="A/B testing + effectiveness"
-            text={`Experiment: ${analytics.assignment.experiment}, variant: ${analytics.assignment.variant}. Recommendation fix-rate: ${(analytics.recommendationEffectiveness * 100).toFixed(1)}%.`}
-          />
-          <FoundationItem
-            title="LLM observability"
-            text={`Trace count: ${analytics.llmTraceCount}. Avg latency: ${analytics.llmObservability.avgLatencyMs} ms. Cost tracked as USD for model-based analyzers.`}
-          />
-        </div>
-      </section>
     </main>
   )
 }
@@ -311,15 +245,6 @@ function Metric({ label, value }: { label: string; value: number | string }) {
       <strong>{value}</strong>
       <span>{label}</span>
     </div>
-  )
-}
-
-function FoundationItem({ title, text }: { title: string; text: string }) {
-  return (
-    <article>
-      <h3>{title}</h3>
-      <p>{text}</p>
-    </article>
   )
 }
 
